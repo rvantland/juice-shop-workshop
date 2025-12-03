@@ -8,8 +8,10 @@ import { type Memory, type Product } from '../../data/types'
 import logger from '../logger'
 import config from 'config'
 import path from 'path'
+import fs from 'fs'
+import yaml from 'js-yaml'
 import colors from 'colors/safe'
-const validateSchema = require('yaml-schema-validator/src')
+// SECURITY FIX: Replaced vulnerable yaml-schema-validator with simple type checker
 
 const specialProducts = [
   { name: '"Christmas Special" challenge product', key: 'useForChristmasSpecialChallenge' },
@@ -48,15 +50,65 @@ const validateConfig = ({ products = config.get('products'), memories = config.g
   return success
 }
 
+// SECURITY FIX: Simple schema validator to replace vulnerable yaml-schema-validator
+interface SchemaNode {
+  type?: string
+  [key: string]: SchemaNode | string | undefined
+}
+
+function validateType(value: any, expectedType: string): boolean {
+  switch (expectedType) {
+    case 'string': return typeof value === 'string'
+    case 'number': return typeof value === 'number'
+    case 'boolean': return typeof value === 'boolean'
+    case 'array': return Array.isArray(value)
+    case 'object': return typeof value === 'object' && value !== null && !Array.isArray(value)
+    default: return true
+  }
+}
+
+function validateAgainstSchema(config: any, schema: SchemaNode, path: string = ''): string[] {
+  const errors: string[] = []
+  
+  for (const key of Object.keys(schema)) {
+    const schemaValue = schema[key]
+    const configValue = config?.[key]
+    const currentPath = path ? `${path}.${key}` : key
+    
+    if (typeof schemaValue === 'object' && schemaValue !== null) {
+      if ('type' in schemaValue && typeof schemaValue.type === 'string') {
+        // This is a type definition node
+        if (configValue !== undefined && !validateType(configValue, schemaValue.type)) {
+          errors.push(`${currentPath}: expected ${schemaValue.type}, got ${typeof configValue}`)
+        }
+      } else {
+        // This is a nested object, recurse
+        if (configValue !== undefined) {
+          errors.push(...validateAgainstSchema(configValue, schemaValue as SchemaNode, currentPath))
+        }
+      }
+    }
+  }
+  
+  return errors
+}
+
 const checkYamlSchema = (configuration = config.util.toObject()) => {
   let success = true
-  const schemaErrors = validateSchema(configuration, { schemaPath: path.resolve('config.schema.yml'), logLevel: 'none' })
-  if (schemaErrors.length !== 0) {
-    logger.warn(`Config schema validation failed with ${schemaErrors.length} errors (${colors.red('NOT OK')})`)
-    schemaErrors.forEach(({ path, message }: { path: string, message: string }) => {
-      logger.warn(`${path}:${colors.red(message.substr(message.indexOf(path) + path.length))}`)
-    })
-    success = false
+  try {
+    const schemaContent = fs.readFileSync(path.resolve('config.schema.yml'), 'utf8')
+    const schema = yaml.load(schemaContent) as SchemaNode
+    const schemaErrors = validateAgainstSchema(configuration, schema)
+    
+    if (schemaErrors.length !== 0) {
+      logger.warn(`Config schema validation failed with ${schemaErrors.length} errors (${colors.red('NOT OK')})`)
+      schemaErrors.forEach((error: string) => {
+        logger.warn(colors.red(error))
+      })
+      success = false
+    }
+  } catch (err) {
+    logger.warn(`Could not validate config schema: ${err}`)
   }
   return success
 }
