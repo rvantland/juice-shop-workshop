@@ -9,7 +9,7 @@ import fs from 'fs'
 import logger from './logger'
 import config from 'config'
 import jsSHA from 'jssha'
-import download from 'download'
+// SECURITY FIX: Removed vulnerable 'download' package, using native fetch instead
 import crypto from 'crypto'
 import clarinet from 'clarinet'
 
@@ -125,10 +125,15 @@ export const extractFilename = (url: string) => {
   return file
 }
 
+// SECURITY FIX: Using native fetch instead of vulnerable 'download' package
 export const downloadToFile = async (url: string, dest: string) => {
   try {
-    const data = await download(url)
-    fs.writeFileSync(dest, data)
+    const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    const buffer = Buffer.from(await response.arrayBuffer())
+    fs.writeFileSync(dest, buffer)
   } catch (err) {
     logger.warn('Failed to download ' + url + ' (' + getErrorMessage(err) + ')')
   }
