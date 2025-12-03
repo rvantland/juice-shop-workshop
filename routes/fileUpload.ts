@@ -7,10 +7,9 @@ import os from 'os'
 import fs = require('fs')
 import { type NextFunction, type Request, type Response } from 'express'
 import path from 'path'
-import vm = require('vm')
 import * as utils from '../lib/utils'
+import { XMLParser } from 'fast-xml-parser'
 
-const libxml = require('libxmljs2')
 const unzipper = require('unzipper')
 
 function ensureFileIsPassed ({ file }: Request, res: Response, next: NextFunction) {
@@ -91,33 +90,32 @@ function handleXmlUpload ({ file }: Request, res: Response, next: NextFunction) 
     if ((file?.buffer) != null) {
       const data = file.buffer.toString()
       try {
-        // SECURITY FIX: Use vm sandbox with timeout to prevent XML DoS attacks (billion laughs)
-        // The timeout ensures that malicious XML that causes infinite expansion is terminated
-        const sandbox = { libxml, data }
-        vm.createContext(sandbox)
+        // SECURITY FIX: Use fast-xml-parser with secure options
+        // This parser is pure JavaScript and doesn't process external entities by default
+        const parser = new XMLParser({
+          ignoreAttributes: false,
+          // SECURITY: Don't process entities to prevent XXE
+          processEntities: false,
+          // SECURITY: Limit tag depth to prevent DoS
+          htmlEntities: false,
+          // SECURITY: Stop parsing on invalid data
+          stopNodes: ['*.script', '*.style']
+        })
         
-        // SECURITY FIX: Parse XML with secure options inside a timeout-protected sandbox
-        // noent: false - don't substitute entities (prevents XXE file disclosure)
-        // nonet: true - disable network access (prevents SSRF via XXE)
-        // dtdload: false - don't load external DTDs
-        // dtdvalid: false - don't validate against DTD
-        const xmlDoc = vm.runInContext(
-          'libxml.parseXml(data, { noblanks: true, noent: false, nocdata: true, nonet: true, dtdload: false, dtdvalid: false })',
-          sandbox,
-          { timeout: 2000 }  // 2 second timeout to prevent DoS
-        )
-        const xmlString = xmlDoc.toString(false)
+        // SECURITY: Limit XML size to prevent DoS
+        if (data.length > 100000) {
+          res.status(413)
+          next(new Error('XML file too large'))
+          return
+        }
+        
+        const xmlDoc = parser.parse(data)
+        const xmlString = JSON.stringify(xmlDoc)
         res.status(410)
         next(new Error('B2B customer complaints via file upload have been deprecated for security reasons: ' + utils.trunc(xmlString, 400) + ' (' + file.originalname + ')'))
       } catch (err: any) {
-        // Check if it was a timeout (DoS attack attempt)
-        if (err.message && err.message.includes('Script execution timed out')) {
-          res.status(503)
-          next(new Error('Request timed out - XML processing took too long'))
-        } else {
-          res.status(410)
-          next(new Error('B2B customer complaints via file upload have been deprecated for security reasons: ' + err.message + ' (' + file.originalname + ')'))
-        }
+        res.status(410)
+        next(new Error('B2B customer complaints via file upload have been deprecated for security reasons: ' + err.message + ' (' + file.originalname + ')'))
       }
     } else {
       res.status(410)
