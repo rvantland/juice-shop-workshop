@@ -14,7 +14,8 @@ import config from 'config'
 // SECURITY FIX: Removed vulnerable 'download' package, using native fetch
 import * as utils from '../lib/utils'
 import { isString } from 'lodash'
-import { Bot } from 'juicy-chat-bot'
+// SECURITY FIX: Replaced vulnerable juicy-chat-bot (uses vm2) with safe implementation
+import { SafeBot } from '../lib/safeChatBot'
 import validateChatBot from '../lib/startup/validateChatBot'
 import * as security from '../lib/insecurity'
 import * as botUtils from '../lib/botUtils'
@@ -23,7 +24,7 @@ const challenges = require('../data/datacache').challenges
 
 let trainingFile = config.get<string>('application.chatBot.trainingData')
 let testCommand: string
-export let bot: Bot | null = null
+export let bot: SafeBot | null = null
 
 export async function initialize () {
   if (utils.isUrl(trainingFile)) {
@@ -47,7 +48,8 @@ export async function initialize () {
   validateChatBot(JSON.parse(trainingSet))
 
   testCommand = JSON.parse(trainingSet).data[0].utterances[0]
-  bot = new Bot(config.get('application.chatBot.name'), config.get('application.chatBot.greeting'), trainingSet, config.get('application.chatBot.defaultResponse'))
+  // SECURITY FIX: Using SafeBot instead of vulnerable juicy-chat-bot
+  bot = new SafeBot(config.get('application.chatBot.name'), config.get('application.chatBot.greeting'), trainingSet, config.get('application.chatBot.defaultResponse'))
   return bot.train()
 }
 
@@ -67,7 +69,8 @@ async function processQuery (user: User, req: Request, res: Response, next: Next
     return
   }
 
-  if (!bot.factory.run(`currentUser('${user.id}')`)) {
+  // SECURITY FIX: Using safe currentUser method instead of vulnerable factory.run()
+  if (!bot.currentUser(`${user.id}`)) {
     try {
       bot.addUser(`${user.id}`, username)
       res.status(200).json({
@@ -80,7 +83,7 @@ async function processQuery (user: User, req: Request, res: Response, next: Next
     return
   }
 
-  if (bot.factory.run(`currentUser('${user.id}')`) !== username) {
+  if (bot.currentUser(`${user.id}`) !== username) {
     bot.addUser(`${user.id}`, username)
     try {
       bot.addUser(`${user.id}`, username)
