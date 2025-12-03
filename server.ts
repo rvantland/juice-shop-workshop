@@ -44,7 +44,8 @@ const yaml = require('js-yaml')
 const swaggerUi = require('swagger-ui-express')
 const RateLimit = require('express-rate-limit')
 const client = require('prom-client')
-const ipfilter = require('express-ipfilter').IpFilter
+// SECURITY FIX: Replaced vulnerable express-ipfilter with safe custom implementation
+const { ipFilter: ipfilter } = require('./lib/ipFilter')
 const swaggerDocument = yaml.load(fs.readFileSync('./swagger.yml', 'utf8'))
 const {
   ensureFileIsPassed,

@@ -13,17 +13,6 @@ module.exports = function (grunt) {
   grunt.initConfig({
     pkg: grunt.file.readJSON('package.json'),
 
-    replace_json: {
-      manifest: {
-        src: 'package.json',
-        changes: {
-          'engines.node': (node || '<%= pkg.engines.node %>'),
-          os: (os ? [os] : '<%= pkg.os %>'),
-          cpu: (platform ? [platform] : '<%= pkg.cpu %>')
-        }
-      }
-    },
-
     compress: {
       pckg: {
         options: {
@@ -83,7 +72,27 @@ module.exports = function (grunt) {
     })
   })
 
-  grunt.loadNpmTasks('grunt-replace-json')
   grunt.loadNpmTasks('grunt-contrib-compress')
-  grunt.registerTask('package', ['replace_json:manifest', 'compress:pckg', 'checksum'])
+  
+  // SECURITY FIX: Custom replace_json task to replace vulnerable grunt-replace-json
+  grunt.registerTask('replace_json', 'Replace values in package.json', function () {
+    const fs = require('fs')
+    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+    
+    if (node) {
+      pkg.engines = pkg.engines || {}
+      pkg.engines.node = node
+    }
+    if (os) {
+      pkg.os = [os]
+    }
+    if (platform) {
+      pkg.cpu = [platform]
+    }
+    
+    fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
+    grunt.log.writeln('Updated package.json with platform configuration.')
+  })
+  
+  grunt.registerTask('package', ['replace_json', 'compress:pckg', 'checksum'])
 }
